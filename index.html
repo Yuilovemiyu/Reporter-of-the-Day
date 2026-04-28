@@ -1,180 +1,431 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Store Reporter Scheduler</title>
+  <title>HC/PG SA Monthly Report</title>
 
-  <link rel="manifest" href="manifest.json">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      padding: 20px;
-      background: #f4f6f8;
-    }
-    h1 { text-align: center; }
-    .container {
-      max-width: 700px;
-      margin: auto;
-      background: white;
-      padding: 20px;
-      border-radius: 12px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-    }
-    input, button {
-      padding: 10px;
-      margin: 5px 0;
-      width: 100%;
-      border-radius: 8px;
-      border: 1px solid #ccc;
-    }
-    button {
-      background: #005bac;
+    body { font-family: Arial; padding: 15px; }
+    input, select, button { margin: 5px; padding: 8px; width: 100%; }
+    table { border-collapse: collapse; margin-top: 10px; width: 100%; }
+    th, td { border: 1px solid black; padding: 6px; text-align: center; font-size: 12px; }
+
+    .edit-btn {
+      background: #007bff;
       color: white;
-      cursor: pointer;
       border: none;
+      padding: 4px 6px;
+      cursor: pointer;
     }
-    .result {
-      margin-top: 20px;
+
+    #dayCapture {
+      background: #fff;
       padding: 10px;
-      background: #eef5ff;
-      border-radius: 8px;
-    }
-    .today {
-      background: #d1ffd6;
-      font-weight: bold;
+      margin-top: 10px;
+      border: 1px solid #ccc;
     }
   </style>
 </head>
+
 <body>
-  <div class="container">
-    <h1>Store Reporter Scheduler</h1>
 
-    <button onclick="requestNotificationPermission()">Enable Notifications</button>
+<h2>📊 HC/PG SA Monthly Report</h2>
 
-    <label>Start Date:</label>
-    <input id="startDate" type="date">
+<input type="date" id="date">
 
-    <label>Number of Days:</label>
-    <input id="days" type="number" value="7">
+<select id="store"></select>
 
-    <button onclick="generateSchedule()">Generate Schedule</button>
+<input type="number" id="total" placeholder="Total Apps">
+<input type="number" id="signed" placeholder="Signed">
+<input type="number" id="rejected" placeholder="Rejected">
+<input type="number" id="cancelled" placeholder="Cancelled">
 
-    <div class="result" id="output"></div>
-  </div>
+<select id="nonapps" disabled>
+  <option value="">Non Apps</option>
+  <option value="Yes">Yes</option>
+  <option value="No">No</option>
+</select>
 
-  <script>
-    const stores = [
-      { name: "Anabu", restDay: 1 },
-      { name: "Crossing East", restDay: 1 },
-      { name: "Tanza", restDay: 1 },
-      { name: "Brookside", restDay: 1 },
-      { name: "Binan Bayan", restDay: 1 },
-      { name: "Molino", restDay: 1 },
-      { name: "Manggahan", restDay: 1 },
-      { name: "Pacita", restDay: 1 },
+<button onclick="addEntry()">➕ Add Entry</button>
+<button onclick="saveAllToday()">💾 Save All (Today)</button>
+<button onclick="updateEntry()">💾 Save Update</button>
 
-      { name: "Paradahan", restDay: 2 },
-      { name: "San Pedro", restDay: 2 },
-      { name: "Bacoor", restDay: 2 },
-      { name: "Tagaytay", restDay: 2 },
-      { name: "Dasmarinas", restDay: 2 },
-      { name: "GMA", restDay: 2 },
-      { name: "Kawit", restDay: 2 },
+<h3>📦 Preview</h3>
+<table id="previewTable"></table>
 
-      { name: "Gentri Jr.", restDay: 4 }
-    ];
+<h3>📅 Single Day Report</h3>
 
-    function getAvailableStores(date) {
-      const day = date.getDay();
-      return stores.filter(store => store.restDay !== day);
+<input type="date" id="filterDate">
+<button onclick="loadDayReport()">🔍 Load Day</button>
+<button onclick="saveDayPNG()">🖼️ Save PNG</button>
+
+<div id="dayCapture">
+  <h4 id="dayTitle"></h4>
+  <table id="dayReportTable"></table>
+</div>
+
+<h3>📊 Monthly Totals</h3>
+<table id="monthlyTotals"></table>
+
+<script>
+
+// ================= FIREBASE =================
+const firebaseConfig = {
+  apiKey: "AIzaSyBoPZ6nioxI_fzVrdLSh-pQ_EEqSdPOnrY",
+  authDomain: "pattern-for-reporting.firebaseapp.com",
+  projectId: "pattern-for-reporting"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+// ================= STORES =================
+const stores = [
+  {name:"Brookside", rest:"Monday"},
+  {name:"Manggahan", rest:"Monday"},
+  {name:"Bacoor", rest:"Tuesday"},
+  {name:"Dasmarinas", rest:"Tuesday"},
+  {name:"Gentri Jr.", rest:"Thursday"},
+  {name:"Tanza", rest:"Monday"},
+  {name:"Kawit", rest:"Tuesday"},
+  {name:"Tanza Paradahan", rest:"Tuesday"},
+  {name:"GMA", rest:"Tuesday"},
+  {name:"Tagaytay", rest:"Tuesday"},
+  {name:"Molino", rest:"Monday"},
+  {name:"Paliparan", rest:"Monday"},
+  {name:"San Pedro", rest:"Tuesday"},
+  {name:"Pacita", rest:"Monday"},
+  {name:"Binan Bayan", rest:"Monday"},
+  {name:"Crossing East", rest:"Monday"},
+  {name:"Anabu (Yssabelle)", rest:"Tuesday"},
+  {name:"Anabu (Ian)", rest:"Monday"}
+];
+
+// ================= DOM =================
+const storeSelect = document.getElementById("store");
+const totalInput = document.getElementById("total");
+const nonapps = document.getElementById("nonapps");
+const dateInput = document.getElementById("date");
+
+let todayEntries = [];
+let editingId = null;
+
+// ================= INIT =================
+stores.forEach(s=>{
+  let o = document.createElement("option");
+  o.value = s.name;
+  o.text = s.name;
+  storeSelect.add(o);
+});
+
+dateInput.value = new Date().toISOString().split("T")[0];
+document.getElementById("filterDate").value = dateInput.value;
+
+// ================= NON APPS =================
+totalInput.addEventListener("input", ()=>{
+  if(Number(totalInput.value) <= 1){
+    nonapps.disabled = false;
+  } else {
+    nonapps.disabled = true;
+    nonapps.value = "";
+  }
+});
+
+// ================= RESET =================
+function resetForm(){
+  storeSelect.selectedIndex = 0;
+  totalInput.value = "";
+  document.getElementById("signed").value = "";
+  document.getElementById("rejected").value = "";
+  document.getElementById("cancelled").value = "";
+  nonapps.value = "";
+}
+
+// ================= ADD =================
+function addEntry(){
+
+  const entry = {
+    date: dateInput.value,
+    store: storeSelect.value,
+    total: Number(totalInput.value)||0,
+    signed: Number(document.getElementById("signed").value)||0,
+    rejected: Number(document.getElementById("rejected").value)||0,
+    cancelled: Number(document.getElementById("cancelled").value)||0,
+    nonapps: nonapps.value || "-"
+  };
+
+  todayEntries.push(entry);
+  renderPreview();
+  resetForm();
+}
+
+// ================= PREVIEW =================
+function renderPreview(){
+
+  const table = document.getElementById("previewTable");
+
+  table.innerHTML = `
+    <tr>
+      <th>Date</th><th>Store</th>
+      <th>Total</th><th>Signed</th>
+      <th>Rejected</th><th>Cancelled</th><th>Non Apps</th>
+    </tr>
+  `;
+
+  todayEntries.forEach(e=>{
+    let r = table.insertRow();
+    r.innerHTML = `
+      <td>${e.date}</td>
+      <td>${e.store}</td>
+      <td>${e.total}</td>
+      <td>${e.signed}</td>
+      <td>${e.rejected}</td>
+      <td>${e.cancelled}</td>
+      <td>${e.nonapps}</td>
+    `;
+  });
+}
+
+// ================= SAVE ALL =================
+async function saveAllToday(){
+
+  if(todayEntries.length === 0) return alert("No entries");
+
+  let batch = db.batch();
+
+  todayEntries.forEach(e=>{
+    const ref = db.collection("reports").doc();
+    batch.set(ref,{...e,timestamp:Date.now()});
+  });
+
+  await batch.commit();
+
+  todayEntries = [];
+  renderPreview();
+
+  await updateMonthlyIncremental();
+
+  alert("Saved successfully");
+}
+
+// ================= MONTHLY RECALC =================
+async function updateMonthlyIncremental(){
+
+  const snap = await db.collection("reports").get();
+
+  let totals = {};
+
+  snap.forEach(doc=>{
+    const d = doc.data();
+    const month = d.date?.substring(0,7);
+    if(!month || !d.store) return;
+
+    const key = month + "_" + d.store;
+
+    if(!totals[key]){
+      totals[key] = {
+        month,
+        store: d.store,
+        total:0,
+        signed:0,
+        rejected:0,
+        cancelled:0
+      };
     }
 
-    function getTodayStore() {
-      const today = new Date();
-      const availableStores = getAvailableStores(today);
-      if (availableStores.length === 0) return "No available store";
+    totals[key].total += Number(d.total||0);
+    totals[key].signed += Number(d.signed||0);
+    totals[key].rejected += Number(d.rejected||0);
+    totals[key].cancelled += Number(d.cancelled||0);
+  });
 
-      const index = Math.floor((today - new Date(today.getFullYear(), 0, 0)) / 86400000);
-      return availableStores[index % availableStores.length].name;
-    }
+  const batch = db.batch();
+  const col = db.collection("monthly_totals");
 
-    function generateSchedule() {
-      const startDateInput = document.getElementById('startDate').value;
-      const days = parseInt(document.getElementById('days').value);
+  Object.values(totals).forEach(t=>{
+    batch.set(col.doc(t.month+"_"+t.store), t);
+  });
 
-      if (!startDateInput) {
-        alert('Please select a start date');
-        return;
-      }
+  await batch.commit();
+}
 
-      const startDate = new Date(startDateInput);
-      const today = new Date();
+// ================= LOAD DAY =================
+function loadDayReport(){
 
-      let output = '';
-      let index = 0;
+  const selected = document.getElementById("filterDate").value;
+  document.getElementById("dayTitle").innerText = "Daily: " + selected;
 
-      for (let i = 0; i < days; i++) {
-        let currentDate = new Date(startDate);
-        currentDate.setDate(startDate.getDate() + i);
+  db.collection("reports")
+    .where("date","==",selected)
+    .onSnapshot(snapshot=>{
 
-        const availableStores = getAvailableStores(currentDate);
+      const table = document.getElementById("dayReportTable");
 
-        if (availableStores.length === 0) {
-          output += `<p><strong>${currentDate.toDateString()}</strong>: No available store</p>`;
-          continue;
-        }
+      table.innerHTML = `
+        <tr>
+          <th>Date</th><th>Store</th>
+          <th>Total</th><th>Signed</th>
+          <th>Rejected</th><th>Cancelled</th>
+          <th>Non Apps</th>
+          <th>Action</th>
+        </tr>
+      `;
 
-        const store = availableStores[index % availableStores.length];
-        index++;
+      snapshot.forEach(doc=>{
+        const d = doc.data();
 
-        const isToday = currentDate.toDateString() === today.toDateString();
-
-        output += `<p class="${isToday ? 'today' : ''}">
-          <strong>${currentDate.toDateString()}</strong>: ${store.name}
-        </p>`;
-      }
-
-      document.getElementById('output').innerHTML = output;
-    }
-
-    // 🔔 REAL NOTIFICATIONS
-    function requestNotificationPermission() {
-      Notification.requestPermission().then(permission => {
-        if (permission === 'granted') {
-          alert('Notifications enabled!');
-        }
+        let r = table.insertRow();
+        r.innerHTML = `
+          <td>${d.date}</td>
+          <td>${d.store}</td>
+          <td>${d.total}</td>
+          <td>${d.signed}</td>
+          <td>${d.rejected}</td>
+          <td>${d.cancelled}</td>
+          <td>${d.nonapps || "-"}</td>
+          <td>
+            <button class="edit-btn" onclick="editEntry('${doc.id}', ${JSON.stringify(d).replace(/"/g, '&quot;')})">
+              ✏️
+            </button>
+          </td>
+        `;
       });
+  });
+}
+
+// ================= EDIT =================
+function editEntry(id, data){
+
+  document.getElementById("date").value = data.date;
+  document.getElementById("store").value = data.store;
+  document.getElementById("total").value = data.total;
+  document.getElementById("signed").value = data.signed;
+  document.getElementById("rejected").value = data.rejected;
+  document.getElementById("cancelled").value = data.cancelled;
+  document.getElementById("nonapps").value = data.nonapps || "";
+
+  editingId = id;
+
+  alert("Editing mode enabled. Click 'Save Update'");
+}
+
+// ================= UPDATE =================
+async function updateEntry(){
+
+  if(!editingId){
+    alert("No entry selected");
+    return;
+  }
+
+  const updatedData = {
+    date: document.getElementById("date").value,
+    store: document.getElementById("store").value,
+    total: Number(document.getElementById("total").value)||0,
+    signed: Number(document.getElementById("signed").value)||0,
+    rejected: Number(document.getElementById("rejected").value)||0,
+    cancelled: Number(document.getElementById("cancelled").value)||0,
+    nonapps: document.getElementById("nonapps").value || "-"
+  };
+
+  await db.collection("reports").doc(editingId).update(updatedData);
+
+  editingId = null;
+
+  await updateMonthlyIncremental();
+
+  alert("Updated successfully");
+}
+
+// ================= PNG =================
+function saveDayPNG(){
+
+  const container = document.getElementById("dayCapture");
+
+  html2canvas(container,{
+    scale:2,
+    backgroundColor:"#fff"
+  }).then(canvas=>{
+    const a = document.createElement("a");
+    a.download = "day-report-"+document.getElementById("filterDate").value+".png";
+    a.href = canvas.toDataURL("image/png");
+    a.click();
+  });
+}
+
+// ================= MONTHLY UI (GROUPED WITH TOTALS) =================
+db.collection("monthly_totals")
+  .onSnapshot(snapshot=>{
+
+    const table = document.getElementById("monthlyTotals");
+
+    table.innerHTML = `
+      <tr>
+        <th>Month</th><th>Store</th>
+        <th>Total</th><th>Signed</th>
+        <th>Rejected</th><th>Cancelled</th>
+      </tr>
+    `;
+
+    if(snapshot.empty){
+      table.innerHTML += `<tr><td colspan="6">No data yet</td></tr>`;
+      return;
     }
 
-    function sendNotification() {
-      if (Notification.permission === 'granted') {
-        const store = getTodayStore();
+    let grouped = {};
 
-        new Notification('📢 Daily Report Reminder', {
-          body: `Today's reporting store: ${store}`,
-          icon: 'https://cdn-icons-png.flaticon.com/512/1827/1827392.png'
-        });
-      }
-    }
+    snapshot.forEach(doc=>{
+      const d = doc.data();
+      if(!grouped[d.month]) grouped[d.month] = [];
+      grouped[d.month].push(d);
+    });
 
-    function checkAlarm() {
-      const now = new Date();
-      const hours = now.getHours();
-      const minutes = now.getMinutes();
+    Object.keys(grouped).sort().forEach(month => {
 
-      if ((hours === 10 || hours === 17) && minutes === 0) {
-        sendNotification();
-      }
-    }
+      let mTotal=0, mSigned=0, mRejected=0, mCancelled=0;
 
-    setInterval(checkAlarm, 30000);
+      let header = table.insertRow();
+      header.style.background="#ddd";
+      header.style.fontWeight="bold";
+      header.innerHTML = `<td colspan="6">${month}</td>`;
 
-    // 📱 Service Worker Registration (for PWA)
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('service-worker.js');
-    }
-  </script>
+      grouped[month].forEach(d=>{
+        mTotal += Number(d.total||0);
+        mSigned += Number(d.signed||0);
+        mRejected += Number(d.rejected||0);
+        mCancelled += Number(d.cancelled||0);
+
+        let r = table.insertRow();
+        r.innerHTML = `
+          <td>${d.month}</td>
+          <td>${d.store}</td>
+          <td>${d.total}</td>
+          <td>${d.signed}</td>
+          <td>${d.rejected}</td>
+          <td>${d.cancelled}</td>
+        `;
+      });
+
+      let totalRow = table.insertRow();
+      totalRow.style.fontWeight="bold";
+      totalRow.style.background="#f2f2f2";
+      totalRow.innerHTML = `
+        <td colspan="2">${month} TOTAL</td>
+        <td>${mTotal}</td>
+        <td>${mSigned}</td>
+        <td>${mRejected}</td>
+        <td>${mCancelled}</td>
+      `;
+    });
+
+});
+
+</script>
+
 </body>
 </html>
